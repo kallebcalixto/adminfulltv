@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KBS TV - Admin Mobile</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; text-align: center; margin: 0; padding: 10px; overflow-x: hidden; }
+        
+        .tv-viewport { 
+            width: 95vw; 
+            height: 53.4vw; 
+            max-width: 800px; 
+            max-height: 450px; 
+            background: #000; 
+            border: 3px solid #38bdf8; 
+            position: relative; 
+            margin: 10px auto; 
+            overflow: hidden; 
+            border-radius: 8px; 
+            touch-action: none; 
+        }
+
+        .element { position: absolute; cursor: move; border: 2px solid #fff; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; text-transform: uppercase; user-select: none; box-sizing: border-box; touch-action: none; transition: transform 0.2s; }
+        
+        .resizer { width: 25px; height: 25px; background: rgba(255,255,255,0.8); position: absolute; right: 0; bottom: 0; cursor: nwse-resize; border-radius: 2px; z-index: 10; }
+        
+        #box-video { border-color: #38bdf8; color: #38bdf8; }
+        #box-vid-banner { border-color: #facc15; color: #facc15; }
+        #box-grade { border-color: #e11d48; color: #e11d48; }
+        .active { border: 3px solid #22c55e !important; box-shadow: 0 0 15px #22c55e; z-index: 100; }
+
+        .card { background: #1e293b; padding: 15px; border-radius: 10px; border: 1px solid #334155; margin: 15px auto; width: 95vw; max-width: 800px; text-align: left; box-sizing: border-box; }
+        .flex { display: flex; flex-wrap: wrap; gap: 8px; }
+        
+        input, select, button { padding: 12px; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: white; font-size: 16px; }
+        button { cursor: pointer; font-weight: bold; transition: 0.2s; border: none; }
+        
+        .btn-salvar-mkt { background: #28a745; color: white; width: 100%; margin-top: 10px; }
+        .btn-save-lay { background: #22c55e; color: white; flex: 1; }
+        .btn-rot { background: #a855f7; color: white; flex: 1; min-width: 150px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 8px; border-bottom: 1px solid #334155; text-align: left; font-size: 12px; }
+        img.thumb { width: 50px; height: 30px; object-fit: cover; }
+        
+        .checkbox-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+
+    <h2 style="font-size: 1.2rem;">🚀 Ajuste Touch & Rotação</h2>
+    <div class="tv-viewport" id="screen">
+        <div id="box-video" class="element" data-rot="0">PLAYER TV<div class="resizer"></div></div>
+        <div id="box-vid-banner" class="element" data-rot="0">BANNER VÍDEO<div class="resizer"></div></div>
+        <div id="box-grade" class="element" data-rot="0">GRADE ANÚNCIOS<div class="resizer"></div></div>
+    </div>
+
+    <div class="card">
+        <div class="flex" style="margin-bottom: 10px;">
+            <input type="text" id="url-video" placeholder="URL do Vídeo Banner" style="flex: 1;" onchange="saveLayout()">
+        </div>
+        <div class="flex">
+            <button class="btn-rot" onclick="rotate()">🔄 GIRAR 90° (Selecionado)</button>
+            <button class="btn-save-lay" onclick="saveLayout()">💾 SALVAR TUDO</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 id="titulo-form" style="font-size: 1rem;">➕ Programar Foto</h3>
+        <div class="flex">
+            <input type="text" id="url" placeholder="URL da Imagem" style="width: 100%;">
+            <select id="pos" style="flex: 1;">
+                <option value="0">⭐ GERAL (Full)</option>
+            </select>
+            <input type="time" id="ini" value="08:00">
+            <input type="time" id="fim" value="18:00">
+        </div>
+        <div class="checkbox-group" id="dias">
+            <label><input type="checkbox" value="1" checked> Seg</label>
+            <label><input type="checkbox" value="2" checked> Ter</label>
+            <label><input type="checkbox" value="3" checked> Qua</label>
+            <label><input type="checkbox" value="4" checked> Qui</label>
+            <label><input type="checkbox" value="5" checked> Sex</label>
+            <label><input type="checkbox" value="6" checked> Sáb</label>
+            <label><input type="checkbox" value="0" checked> Dom</label>
+        </div>
+        <button class="btn-salvar-mkt" id="btn-salvar" onclick="salvarMkt()">Adicionar à Grade</button>
+    </div>
+
+    <div class="card" style="overflow-x: auto;">
+        <table id="lista-anuncios">
+            <thead><tr><th>Foto</th><th>Pos</th><th>Horário</th><th>Ações</th></tr></thead>
+            <tbody id="lista"></tbody>
+        </table>
+    </div>
+
+<script>
+    const appLay = firebase.initializeApp({ databaseURL: "https://totem-full-tv-default-rtdb.firebaseio.com" }, "layApp");
+    const dbLay = appLay.database();
+
+    const appMkt = firebase.initializeApp({
+        apiKey: "AIzaSyBh-dhSMEgVO0dPyPdE-JAtPb2LeKaq9og",
+        authDomain: "marketing-19f3d.firebaseapp.com",
+        databaseURL: "https://marketing-19f3d-default-rtdb.firebaseio.com",
+        projectId: "marketing-19f3d",
+        storageBucket: "marketing-19f3d.firebasestorage.app"
+    }, "mktApp");
+    const dbMkt = appMkt.database();
+
+    let selectedId = 'box-video'; // Padrão selecionado
+    let currentElement = null;
+    let isResizing = false;
+    let startX, startY, startW, startH, startL, startT;
+
+    dbLay.ref('layout_totem').on('value', (snap) => {
+        const d = snap.val();
+        if (d) {
+            if(d.vidBanner && d.vidBanner.url) document.getElementById('url-video').value = d.vidBanner.url;
+            
+            const apply = (id, v) => {
+                const el = document.getElementById(id);
+                if (!v || !el) return;
+                const container = document.getElementById('screen');
+                const cw = container.offsetWidth / 100;
+                const ch = container.offsetHeight / 100;
+                el.style.left = (v.x * cw) + "px";
+                el.style.top = (v.y * ch) + "px";
+                el.style.width = (v.w * cw) + "px";
+                el.style.height = (v.h * ch) + "px";
+                el.style.transform = `rotate(${v.r || 0}deg)`;
+                el.setAttribute('data-rot', v.r || 0);
+            };
+            apply('box-video', d.video);
+            apply('box-grade', d.grade);
+            apply('box-vid-banner', d.vidBanner);
+        }
+    }, { onlyOnce: true });
+
+    function startDrag(e) {
+        const touch = e.type === 'touchstart' ? e.touches[0] : e;
+        const el = e.target.closest('.element');
+        if (!el) return;
+
+        selectedId = el.id; // Atualiza o ID selecionado para o botão de girar
+        currentElement = el;
+        document.querySelectorAll('.element').forEach(item => item.classList.remove('active'));
+        el.classList.add('active');
+
+        isResizing = e.target.classList.contains('resizer');
+        startX = touch.clientX;
+        startY = touch.clientY;
+        startW = el.offsetWidth;
+        startH = el.offsetHeight;
+        startL = el.offsetLeft;
+        startT = el.offsetTop;
+    }
+
+    function doDrag(e) {
+        if (!currentElement) return;
+        const touch = e.type === 'touchmove' ? e.touches[0] : e;
+        
+        if (isResizing) {
+            currentElement.style.width = Math.max(40, startW + (touch.clientX - startX)) + "px";
+            currentElement.style.height = Math.max(40, startH + (touch.clientY - startY)) + "px";
+        } else {
+            currentElement.style.left = (startL + (touch.clientX - startX)) + "px";
+            currentElement.style.top = (startT + (touch.clientY - startY)) + "px";
+        }
+    }
+
+    function endDrag() {
+        if(currentElement) { 
+            saveLayout(); 
+            currentElement = null; 
+            isResizing = false; 
+        }
+    }
+
+    // Função para Girar 90 graus
+    window.rotate = () => {
+        const el = document.getElementById(selectedId);
+        if(!el) return;
+        let r = parseInt(el.getAttribute('data-rot') || 0);
+        r = (r + 90) % 360;
+        el.setAttribute('data-rot', r);
+        el.style.transform = `rotate(${r}deg)`;
+        saveLayout(); // Salva automaticamente após girar
+    };
+
+    const screen = document.getElementById('screen');
+    screen.addEventListener('mousedown', startDrag);
+    screen.addEventListener('touchstart', startDrag, {passive: false});
+    window.addEventListener('mousemove', doDrag);
+    window.addEventListener('touchmove', doDrag, {passive: false});
+    window.addEventListener('mouseup', endDrag);
+    window.addEventListener('touchend', endDrag);
+
+    window.saveLayout = () => {
+        const container = document.getElementById('screen');
+        const cw = container.offsetWidth;
+        const ch = container.offsetHeight;
+
+        const getP = (id) => {
+            const e = document.getElementById(id);
+            return { 
+                x: (e.offsetLeft / cw) * 100, 
+                y: (e.offsetTop / ch) * 100, 
+                w: (e.offsetWidth / cw) * 100, 
+                h: (e.offsetHeight / ch) * 100,
+                r: parseInt(e.getAttribute('data-rot') || 0)
+            };
+        };
+
+        dbLay.ref('layout_totem').update({
+            video: getP('box-video'),
+            grade: getP('box-grade'),
+            vidBanner: { ...getP('box-vid-banner'), url: document.getElementById('url-video').value }
+        });
+    };
+
+    const selectPos = document.getElementById('pos');
+    for(let i=1; i<=16; i++) { selectPos.innerHTML += `<option value="${i}">Q${i}</option>`; }
+
+    window.salvarMkt = () => {
+        const url = document.getElementById('url').value;
+        const pos = document.getElementById('pos').value;
+        const start = document.getElementById('ini').value;
+        const end = document.getElementById('fim').value;
+        const days = Array.from(document.querySelectorAll('#dias input:checked')).map(cb => parseInt(cb.value));
+        if(!url) return alert("Insira o Link da Imagem!");
+        dbMkt.ref('anuncios').push({ url, pos, start, end, days });
+        document.getElementById('url').value = "";
+    };
+
+    dbMkt.ref('anuncios').on('value', snap => {
+        const lista = document.getElementById('lista'); lista.innerHTML = "";
+        snap.forEach(item => {
+            const d = item.val(); const key = item.key;
+            lista.innerHTML += `<tr><td><img class="thumb" src="${d.url}"></td><td>${d.pos}</td><td>${d.start}</td>
+                <td><button style="background:#d9534f" onclick="dbMkt.ref('anuncios/${key}').remove()">X</button></td></tr>`;
+        });
+    });
+</script>
+</body>
+</html>
